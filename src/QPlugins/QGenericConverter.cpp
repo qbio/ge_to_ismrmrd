@@ -12,12 +12,7 @@ struct LOADTEST {
   ~LOADTEST() { std::cerr << __FILE__ << ": shared object unloaded" << std::endl; }
 } loadTest;
 
-namespace PfileToIsmrmrd {
-
-QGenericConverter::QGenericConverter() : SequenceConverter()
-{
-   
-}
+//namespace PfileToIsmrmrd {
 
 // use the psdname to determine if the converter should infer the slice indices rather than
 // use the index stored in the header
@@ -364,5 +359,5 @@ std::vector<ISMRMRD::Acquisition> QGenericConverter::getAcquisitions(GERecon::Sc
 
 SEQUENCE_CONVERTER_FACTORY_DECLARE(QGenericConverter)
 
-} // namespace PfileToIsmrmrd
+//} // namespace PfileToIsmrmrd
 

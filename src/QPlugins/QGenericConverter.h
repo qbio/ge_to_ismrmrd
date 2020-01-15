@@ -3,17 +3,17 @@
 #ifndef QGENERIC_CONVERTER_H
 #define QGENERIC_CONVERTER_H
 
-#include "SequenceConverter.h"
+#include "GenericConverter.h"
+
 // TW GE stuff
 #include <imagedb.h>
 
-namespace PfileToIsmrmrd {
+//namespace PfileToIsmrmrd {
 
-class QGenericConverter: public SequenceConverter
+class QGenericConverter: public PfileToIsmrmrd::GenericConverter
 {
 public:
 
-    QGenericConverter();
     virtual std::vector<ISMRMRD::Acquisition> getAcquisitions (GERecon::Legacy::PfilePointer &pfile,
                                                                unsigned int view_num);
 
@@ -28,7 +28,7 @@ protected:
             
 };
 
-} // namespace PfileToIsmrmrd
+//} // namespace PfileToIsmrmrd
 
 #endif /* QGENERIC_CONVERTER_H */
 
