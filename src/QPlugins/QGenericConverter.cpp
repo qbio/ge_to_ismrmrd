@@ -5,6 +5,9 @@
 #include <string>
 #include <sstream>
 
+#include <Orchestra/Arc/Arc.h>
+#include <Orchestra/Arc/SamplingPattern.h>
+
 #include "QGenericConverter.h"
 
 struct LOADTEST {
@@ -202,6 +205,272 @@ std::vector<ISMRMRD::Acquisition> QGenericConverter::getAcquisitions(GERecon::Le
 * @throws std::runtime_error { if plugin encounters data it cannot handle }
 */
 std::vector<ISMRMRD::Acquisition> QGenericConverter::getAcquisitions(GERecon::ScanArchivePointer &scanArchivePtr,
+                                                                    unsigned int acqMode)
+{
+   GERecon::Legacy::LxDownloadDataPointer lxData = boost::dynamic_pointer_cast<GERecon::Legacy::LxDownloadData>(scanArchivePtr->LoadDownloadData());
+
+   // Make a decision which function to run based on the 3D flag
+   if(lxData->Is3D()) {
+      return getAcquisitions3D(scanArchivePtr,acqMode);
+   } else {
+      std::cout << "XXO 2D stuff XXO" << std::endl;
+      return getAcquisitions2D(scanArchivePtr,acqMode);
+   }
+}
+
+/**
+*
+* @throws std::runtime_error { if plugin encounters data it cannot handle }
+*/
+
+/* TW Note:
+
+   below is going to be some of the saddest code I have ever written. The reason is that GE is stupid in how
+   they store their data, so I have to do rather stupid things to read it.
+
+   As a result, there is going to be a ton of stuff this code cannot do, and in the beginning there won't be
+   sufficient checks indicating that this code cannot convert a given dataset correctly.
+   
+   When there is a battery of test data, these checks can be incorporated.
+
+   For sure right now it cannot do:
+   - multislab data
+   
+
+*/
+std::vector<ISMRMRD::Acquisition> QGenericConverter::getAcquisitions3D(GERecon::ScanArchivePointer &scanArchivePtr,
+                                                                    unsigned int acqMode)
+{
+   std::vector<ISMRMRD::Acquisition> acqs;
+
+   GERecon::Acquisition::ArchiveStoragePointer archiveStoragePointer = GERecon::Acquisition::ArchiveStorage::Create(scanArchivePtr);
+   GERecon::Legacy::LxDownloadDataPointer lxData = boost::dynamic_pointer_cast<GERecon::Legacy::LxDownloadData>(scanArchivePtr->LoadDownloadData());
+   boost::shared_ptr<GERecon::Legacy::LxControlSource> const controlSource = boost::make_shared<GERecon::Legacy::LxControlSource>(lxData);
+   GERecon::Control::ProcessingControlPointer processingControl = controlSource->CreateOrchestraProcessingControl();
+
+   int const   packetQuantity = archiveStoragePointer->AvailableControlCount();
+
+   int            packetCount = 0;
+   int              dataIndex = 0;
+   int                acqType = 0;
+   unsigned int       nEchoes = processingControl->Value<int>("NumEchoes");
+   unsigned int     nChannels = processingControl->Value<int>("NumChannels");
+   unsigned int     numSlices = processingControl->Value<int>("NumSlices");
+   const int       frame_size = processingControl->Value<int>("AcquiredXRes");
+   const int           nViews = processingControl->Value<int>("AcquiredYRes");
+   const int          acqZRes = processingControl->Value<int>("AcquiredZRes");
+
+   bool      lastMeasFlagSet  = false;
+   size_t     expectedFrames  = 0;
+   size_t     expectedPartitionsPerView = 0;
+   size_t     expectedViewsPerPartition = 0;
+
+   // too lazy to initialize these vectors to actual size, make them huge instead
+   std::vector<size_t> partitionsPerView(4096,0);
+   std::vector<size_t> viewsPerPartition(4096,0);
+
+   // create a sampling pattern for Arc
+   boost::scoped_ptr<GERecon::Arc::SamplingPattern> samplingPattern;
+
+   // TODO: Remove these screen prints
+   std::cout << "3D Acquisition to deal with !" << std::endl;
+   std::cout << "PSDname: " << const_cast<const GERecon::Legacy::LxDownloadData&>(*lxData).ImageHeaderData().psdname << std::endl;
+   std::cout << "[AXR,AXY,AXZ] = [" << frame_size << "," << nViews << "," << acqZRes << "]" << std::endl;
+  
+   // Initialize the trigger counts
+   expectedPartitionsPerView = acqZRes;
+   if(lxData->IsArc()) {
+      const int patternID = processingControl->Value<int>("ArcSamplingPatternID");
+      const int kYPeak = processingControl->Value<int>("ArcKYPeak");
+
+      samplingPattern.reset(new Arc::SamplingPattern(patternID, kYPeak));
+      samplingPattern.reset(new Arc::SamplingPattern("/tmp/kacq_yz.txt.91322591")); //, kYPeak));
+      if (!samplingPattern->IsValid()) {
+         std::cout << "No valid sampking pattern loaded for ID: " << patternID << std::endl;
+      } else {
+         std::cout << "ARC Acceleration detected: [" << samplingPattern->YAcceleration() << " x " << samplingPattern->ZAcceleration() << "]" << std::endl;
+         std::cout << "ARC Sampling Pattern Res: [" << samplingPattern->YRes() << " x " << samplingPattern->ZRes() << "]" << std::endl;
+         std::cout << "Size of view mappings: [" << samplingPattern->ViewMappings().rows() << " x " << samplingPattern->ViewMappings().cols() << "]" << std::endl;
+
+         // this is a horrible hack. Proper way is to analyze the viewmappings
+         std::cout << "Number of views = " << samplingPattern->ViewMappings().rows() << "/" << samplingPattern->ZRes() << " = " << samplingPattern->ViewMappings().rows()/samplingPattern->ZRes() << std::endl;
+         std::cout << "Residual views = " << samplingPattern->ViewMappings().rows() << " mod " << samplingPattern->ZRes() << " = " << samplingPattern->ViewMappings().rows() % samplingPattern->ZRes() << std::endl;
+
+         expectedViewsPerPartition = samplingPattern->ViewMappings().rows()/samplingPattern->ZRes();
+      }
+
+
+   } else {
+
+      expectedViewsPerPartition = nViews; // ignoring Asset
+   }
+   // Initialize the calibration corners for ARC
+
+   // TODO:
+   // 
+   // Create a loop structure for the partitions and views
+   // Start setting flags for FFT conditions
+   // Add code to detect partial fourier in 3D direction (check with VIBE scans)
+   // Identify the loop order, based on view counter
+   //
+   // Add code to deal with ARC sampling pattern
+   //
+   while (packetCount < packetQuantity)
+   {
+      // encoding IDs to fill ISMRMRD headers.
+      int    pe2viewID = 0;
+      int    viewID    = 0;
+
+      GERecon::Acquisition::FrameControlPointer const thisPacket = archiveStoragePointer->NextFrameControl();
+
+      // Need to identify opcode(s) here that will mark acquisition / reference / control
+      if (thisPacket->Control().Opcode() != GERecon::Acquisition::ScanControlOpcode)
+      {
+
+         // this is an issue here, because this limits this to ProgrammableControlPackets
+         GERecon::Acquisition::ProgrammableControlPacket const packetContents = thisPacket->Control().Packet().As<GERecon::Acquisition::ProgrammableControlPacket>();
+
+         viewID    = GERecon::Acquisition::GetPacketValue(packetContents.viewNumH,  packetContents.viewNumL);
+         pe2viewID = GERecon::Acquisition::GetPacketValue(packetContents.sliceNumH, packetContents.sliceNumL);
+
+         // output something if the opcode is not 1, to make it less noisy
+         if(static_cast<uint8_t>(packetContents.opcode) != GERecon::Acquisition::ProgrammableOpcode)
+            std::cout << "viewID = " << viewID << " pe2viewID = " << pe2viewID << " opcode = " << (int)(packetContents.opcode) << std::endl << std::flush;
+         
+         //std::cout << "sliceID = " << sliceID << " (" << static_cast<int>(packetContents.sliceNumH) << "," << static_cast<int>(packetContents.sliceNumL) << ")" << std::endl;
+         if(static_cast<uint8_t>(packetContents.opcode) == GERecon::Acquisition::ProgrammableOpcode) {
+            
+            GERecon::Acquisition::CartesianFrameCommand F(packetContents);
+            F.Dump(std::cout);
+            
+         }
+         // TW: temporary hack, ignore the ViewCopy opcode
+         //     I'm undecided on strategy here, but Packets with no data cause:
+         //     - undefined behaviour/segfault on the ->Data() call (Boo GE)
+         //     - we have nothing to write into the ISMRMRD file either, when we have no data 
+         if(static_cast<uint8_t>(packetContents.opcode) != GERecon::Acquisition::ViewCopyOpcode) {
+            if ((viewID < 1) || (viewID > nViews))
+            {
+               acqType = GERecon::Acquisition::BaselineFrame;
+               // nothing else to be done here for basic 2D case
+            }    
+            else
+            {
+               acqType = GERecon::Acquisition::ImageFrame;
+
+               acqs.resize(dataIndex + 1);
+
+               // TW build in some segmentation fault protection here, as Orchestra WILL segfault on the ->Data() call
+               //    I'm interpreting a 0 rval as meaning that there is no kspace data in the packet as the 
+               //    header states that the data size is [FrameSize x NumChannels x NumFrames] 
+               if(thisPacket->NumFrames() == 0) {
+                  throw std::runtime_error("Attempting to access data of a packet that has no data.");                  
+               }
+ 
+               // TW: Now we are seeing some C++11 suddenly some type inference
+               auto kData = thisPacket->Data();
+
+               // Grab a reference to the acquisition
+               ISMRMRD::Acquisition& acq = acqs.at(dataIndex);
+
+               // Set size of this data frame to receive raw data
+               acq.resize(frame_size, nChannels, 0);
+               acq.clearAllFlags();
+
+               // Initialize the encoding counters for this acquisition.
+               ISMRMRD::EncodingCounters idx;
+               get_view_idx(processingControl, 0, idx);
+
+               idx.slice                  = 0; // assuming single slab 3D, this should be always zero
+               idx.contrast               = packetContents.echoNum;
+               idx.kspace_encode_step_1   = viewID - 1; // TW: Why?
+               idx.kspace_encode_step_2   = pe2viewID;
+
+               // increment the counters
+               ++partitionsPerView[idx.kspace_encode_step_1];
+               ++viewsPerPartition[idx.kspace_encode_step_2];
+
+               acq.idx() = idx;
+
+               // Fill in the rest of the header
+               // acq.measurement_uid() = pfile->RunNumber();
+               acq.scan_counter() = dataIndex;
+               acq.acquisition_time_stamp() = time(NULL);
+               for (int p=0; p<ISMRMRD::ISMRMRD_PHYS_STAMPS; p++) {
+                  acq.physiology_time_stamp()[p] = 0;
+               }
+               acq.available_channels()   = nChannels;
+               acq.discard_pre()          = 0;
+               acq.discard_post()         = 0;
+               acq.center_sample()        = frame_size/2;
+               acq.encoding_space_ref()   = 0;
+               // acq.sample_time_us()       = pfile->sample_time * 1e6;
+
+               for (int ch = 0 ; ch < nChannels ; ch++) {
+                  acq.setChannelActive(ch);
+               }
+
+               /*
+               Flag setting functions, this is a work in progress and will need to be refactored
+
+               */
+              /*
+               if(dataIndex == expectedFrames-1) {
+                  acq.setFlag(ISMRMRD::ISMRMRD_ACQ_LAST_IN_MEASUREMENT);
+                  lastMeasFlagSet = true;
+               }
+
+               if(dataIndex > expectedFrames-1) {
+                 // this needs to be replaced with an exception
+                 std::cerr << "FATAL ERROR: More data than expected received." << std::endl;
+               }
+
+               */
+
+               // set the FFT trigger flags
+               if(viewsPerPartition[idx.kspace_encode_step_2] == 1)
+                  acq.setFlag(ISMRMRD::ISMRMRD_ACQ_FIRST_IN_ENCODE_STEP1);
+
+               if(viewsPerPartition[idx.kspace_encode_step_2] == expectedViewsPerPartition)
+                  acq.setFlag(ISMRMRD::ISMRMRD_ACQ_LAST_IN_ENCODE_STEP1);
+
+               if(partitionsPerView[idx.kspace_encode_step_1] == 1)
+                  acq.setFlag(ISMRMRD::ISMRMRD_ACQ_FIRST_IN_ENCODE_STEP2);
+
+               if(partitionsPerView[idx.kspace_encode_step_1] == expectedPartitionsPerView)
+                  acq.setFlag(ISMRMRD::ISMRMRD_ACQ_LAST_IN_ENCODE_STEP2);
+
+               
+               for (int channelID = 0 ; channelID < nChannels ; channelID++)
+               {
+                  for (int i = 0 ; i < frame_size ; i++)
+                  {
+                     // The last dimension here in kData denotes the view
+                     // index in the control packet that one must stride
+                     // through to get data.  TODO - figure out if this
+                     // can be programatically determined, and if so, use
+                     // it. Will be needed for cases where multiple lines
+                     // of data are contained in a single packet.
+		               acq.data(i, channelID) = kData(i, channelID, 0);
+                  }
+               }
+
+               dataIndex++;
+            }
+         } // if(static_cast<uint8_t>(packetContents.opcode) == 1)
+      }
+
+      packetCount++;
+   }
+
+   return acqs;
+}
+
+/**
+*
+* @throws std::runtime_error { if plugin encounters data it cannot handle }
+*/
+std::vector<ISMRMRD::Acquisition> QGenericConverter::getAcquisitions2D(GERecon::ScanArchivePointer &scanArchivePtr,
                                                                     unsigned int acqMode)
 {
    std::vector<ISMRMRD::Acquisition> acqs;

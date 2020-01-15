@@ -21,6 +21,13 @@ public:
                                                                unsigned int view_num);
 
 protected:
+
+    virtual std::vector<ISMRMRD::Acquisition> getAcquisitions3D(GERecon::ScanArchivePointer &scanArchivePtr,
+                                                               unsigned int view_num);
+
+    virtual std::vector<ISMRMRD::Acquisition> getAcquisitions2D(GERecon::ScanArchivePointer &scanArchivePtr,
+                                                               unsigned int view_num);
+
     virtual int get_view_idx(GERecon::Control::ProcessingControlPointer processingControl,
                              unsigned int view_num, ISMRMRD::EncodingCounters &idx);
 
