@@ -290,6 +290,8 @@ std::vector<ISMRMRD::Acquisition> QGenericConverter::getAcquisitions3D(GERecon::
       } else {
          std::cout << "ARC Acceleration detected: [" << samplingPattern->YAcceleration() << " x " << samplingPattern->ZAcceleration() << "]" << std::endl;
          std::cout << "ARC Sampling Pattern Res: [" << samplingPattern->YRes() << " x " << samplingPattern->ZRes() << "]" << std::endl;
+
+         /* Leave the view mappings be 
          std::cout << "Size of view mappings: [" << samplingPattern->ViewMappings().rows() << " x " << samplingPattern->ViewMappings().cols() << "]" << std::endl;
 
          // this is a horrible hack. Proper way is to analyze the viewmappings
@@ -297,11 +299,43 @@ std::vector<ISMRMRD::Acquisition> QGenericConverter::getAcquisitions3D(GERecon::
          std::cout << "Residual views = " << samplingPattern->ViewMappings().rows() << " mod " << samplingPattern->ZRes() << " = " << samplingPattern->ViewMappings().rows() % samplingPattern->ZRes() << std::endl;
 
          expectedViewsPerPartition = samplingPattern->ViewMappings().rows()/samplingPattern->ZRes();
+         */
+
+         // Look at the EncodesVector
+         std::cout << "Size of encodes vector: [" << samplingPattern->AcquiredLocations().rows() << " x " << samplingPattern->AcquiredLocations().cols() << "]" << std::endl;
+
+         // The following analysis makes only sense for cartesian regular sampling
+         std::vector<size_t> ky_locations;
+         std::vector<size_t> kz_locations;
+
+         // Don't know how to use an iterator for this type, so use for loop for now
+         for(size_t k=0; k<samplingPattern->AcquiredLocations().rows(); k++) {
+            ky_locations.push_back(samplingPattern->AcquiredLocations()(k).ky);
+            kz_locations.push_back(samplingPattern->AcquiredLocations()(k).kz);
+         }
+
+         // first sort the indices
+         std::sort(ky_locations.begin(),ky_locations.end());
+         std::sort(kz_locations.begin(),kz_locations.end());   
+
+         // then make them unique
+         std::vector<size_t>::iterator k_it;
+         k_it = std::unique(ky_locations.begin(),ky_locations.end());
+         ky_locations.resize(std::distance(ky_locations.begin(),k_it) ); 
+         k_it = std::unique(kz_locations.begin(),kz_locations.end());  
+         kz_locations.resize(std::distance(kz_locations.begin(),k_it) ); 
+
+         std::cout << "Unique ky locations in the sampling pattern " << ky_locations.size() << std::endl;
+         std::cout << "Unique kz locations in the sampling pattern " << kz_locations.size() << std::endl;
+
+         // set some of the kspace parameters
+         expectedViewsPerPartition = ky_locations.size();
+         expectedPartitionsPerView = kz_locations.size();
+
+         expectedFrames = samplingPattern->AcquiredLocations().rows();
       }
-
-
    } else {
-
+      expectedFrames = nViews*acqZRes;
       expectedViewsPerPartition = nViews; // ignoring Asset
    }
    // Initialize the calibration corners for ARC
@@ -337,13 +371,6 @@ std::vector<ISMRMRD::Acquisition> QGenericConverter::getAcquisitions3D(GERecon::
          if(static_cast<uint8_t>(packetContents.opcode) != GERecon::Acquisition::ProgrammableOpcode)
             std::cout << "viewID = " << viewID << " pe2viewID = " << pe2viewID << " opcode = " << (int)(packetContents.opcode) << std::endl << std::flush;
          
-         //std::cout << "sliceID = " << sliceID << " (" << static_cast<int>(packetContents.sliceNumH) << "," << static_cast<int>(packetContents.sliceNumL) << ")" << std::endl;
-         if(static_cast<uint8_t>(packetContents.opcode) == GERecon::Acquisition::ProgrammableOpcode) {
-            
-            GERecon::Acquisition::CartesianFrameCommand F(packetContents);
-            F.Dump(std::cout);
-            
-         }
          // TW: temporary hack, ignore the ViewCopy opcode
          //     I'm undecided on strategy here, but Packets with no data cause:
          //     - undefined behaviour/segfault on the ->Data() call (Boo GE)
@@ -414,7 +441,9 @@ std::vector<ISMRMRD::Acquisition> QGenericConverter::getAcquisitions3D(GERecon::
                Flag setting functions, this is a work in progress and will need to be refactored
 
                */
-              /*
+
+               // The last in measurement flag is one of the most important ones, as it is an extremely valuable marker
+               // that can show if a measurement is complete
                if(dataIndex == expectedFrames-1) {
                   acq.setFlag(ISMRMRD::ISMRMRD_ACQ_LAST_IN_MEASUREMENT);
                   lastMeasFlagSet = true;
@@ -424,8 +453,6 @@ std::vector<ISMRMRD::Acquisition> QGenericConverter::getAcquisitions3D(GERecon::
                  // this needs to be replaced with an exception
                  std::cerr << "FATAL ERROR: More data than expected received." << std::endl;
                }
-
-               */
 
                // set the FFT trigger flags
                if(viewsPerPartition[idx.kspace_encode_step_2] == 1)
