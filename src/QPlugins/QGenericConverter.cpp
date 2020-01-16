@@ -339,7 +339,16 @@ std::vector<ISMRMRD::Acquisition> QGenericConverter::getAcquisitions3D(GERecon::
          std::cout << "Unique ky locations in the sampling pattern " << ky_locations.size() << std::endl;
          std::cout << "Unique kz locations in the sampling pattern " << kz_locations.size() << std::endl;
 
+
          // Find the ARC calibration data
+
+         // init the calibration data assuming no acceleration in either axis
+         // will be overwritten by the cases where ky or kz is accelerated
+         arcCalibrationKYStart = ky_locations.front();
+         arcCalibrationKYEnd = ky_locations.back();
+         arcCalibrationKZStart = kz_locations.front();
+         arcCalibrationKZEnd = kz_locations.back();
+
          if(samplingPattern->YAcceleration() > 1) {
             size_t kyCalStartIndex = 0;
             size_t kyCalEndIndex = 0;
@@ -405,6 +414,71 @@ std::vector<ISMRMRD::Acquisition> QGenericConverter::getAcquisitions3D(GERecon::
             std::cout << "Last ACS ky line = " << arcCalibrationKYEnd << std::endl;
          }
 
+         if(samplingPattern->ZAcceleration() > 1) {
+            size_t kzCalStartIndex = 0;
+            size_t kzCalEndIndex = 0;
+
+            // keep this for debugging
+            /*
+            for (auto n : kz_locations)
+               std::cout << n << ' ';
+            std::cout << std::endl;
+            */
+
+            std::vector<size_t> d(kz_locations.size(),0);
+            std::adjacent_difference(kz_locations.begin(),kz_locations.end(),d.begin());
+            // Note: as result of std::adjacent_difference d[0] = 0 ALWAYS!
+
+            // Find the start of the autocalibration range
+            for (size_t n = 0; n<d.size()-1; n++) {
+               if(d[n+1] == 1) {
+                  kzCalStartIndex = n;
+                  break;
+               } else if (n>0 && d[n+1] != samplingPattern->ZAcceleration()) {
+                  // TODO: throw exception here
+                  std::cout << "ERROR: Sampling pattern is not regular ARC sampling" << std::endl;
+                  break;
+               } else if (n == d.size()-2) {
+                  // TODO: throw exception here
+                  std::cout << "ERROR: Now ARC autocalibration data found !" << std::endl;
+                  break;
+               }
+            }
+
+            // find the end of the autocalibration range
+            // Note that the first gap after the autocalibration data maybe LESS than Ry in GE data,
+            // super wacky
+            for (size_t n = kzCalStartIndex; n<d.size()-1; n++) {
+               if(d[n+1] > 1) {
+                  kzCalEndIndex = n;
+                  break;
+               } else if (n>0 && d[n+1] != 1) {
+                  // TODO: throw exception here
+                  std::cout << "ERROR: Sampling pattern is not regular ARC sampling" << std::endl;
+                  break;
+               } else if (n == d.size()-2) {
+                  // if there is no accelerated data in the end, then calibration goes to the end
+                  kzCalEndIndex = d.size()-1;
+                  break;
+               }              
+            }
+
+            // check that the sampling past the autocalibration lines is alright
+            // note, check starts with +2, because of the "uneven" gap thats possible after the autocalibration data
+            for (size_t n = kzCalEndIndex+2; n<d.size(); n++) {
+               if(d[n] != samplingPattern->ZAcceleration()) {
+                  // TODO: throw exception here
+                  std::cout << "ERROR: Sampling pattern is not regular ARC sampling" << std::endl;
+                  break;
+               }
+            }
+            arcCalibrationKZStart = kz_locations[kzCalStartIndex];
+            arcCalibrationKZEnd   = kz_locations[kzCalEndIndex];
+
+            std::cout << "First ACS kz line = " << arcCalibrationKZStart << std::endl;
+            std::cout << "Last ACS kz line = " << arcCalibrationKZEnd << std::endl;
+         }
+
          // set some of the kspace parameters
          expectedViewsPerPartition = ky_locations.size();
          expectedPartitionsPerView = kz_locations.size();
@@ -415,7 +489,6 @@ std::vector<ISMRMRD::Acquisition> QGenericConverter::getAcquisitions3D(GERecon::
       expectedFrames = nViews*acqZRes;
       expectedViewsPerPartition = nViews; // ignoring Asset
    }
-   // Initialize the calibration corners for ARC
 
    // TODO:
    // 
@@ -545,9 +618,14 @@ std::vector<ISMRMRD::Acquisition> QGenericConverter::getAcquisitions3D(GERecon::
                   acq.setFlag(ISMRMRD::ISMRMRD_ACQ_LAST_IN_ENCODE_STEP2);
 
                // mark the autocalibration lines, TODO: Add kz box
-               if(idx.kspace_encode_step_1 >= arcCalibrationKYStart && idx.kspace_encode_step_1 <= arcCalibrationKYEnd)
-                  acq.setFlag(ISMRMRD::ISMRMRD_ACQ_IS_PARALLEL_CALIBRATION_AND_IMAGING);
-                  
+               if(lxData->IsArc()) {
+                  if(idx.kspace_encode_step_1 >= arcCalibrationKYStart 
+                     && idx.kspace_encode_step_1 <= arcCalibrationKYEnd
+                     && idx.kspace_encode_step_2 >= arcCalibrationKZStart
+                     && idx.kspace_encode_step_2 <= arcCalibrationKZEnd)
+                     acq.setFlag(ISMRMRD::ISMRMRD_ACQ_IS_PARALLEL_CALIBRATION_AND_IMAGING);
+               }
+
                for (int channelID = 0 ; channelID < nChannels ; channelID++)
                {
                   for (int i = 0 ; i < frame_size ; i++)
