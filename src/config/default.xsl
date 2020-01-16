@@ -106,7 +106,7 @@
             <x><xsl:value-of select="Header/AcquiredXRes"/></x>
             <y><xsl:value-of select="Header/AcquiredYRes"/></y>
             <xsl:choose>
-                <xsl:when test="(Header/Is3DAcquisition)='true'">
+                <xsl:when test="Header/is3DAcquisition='true'">
                    <z><xsl:value-of select="Header/AcquiredZRes"/></z>
                 </xsl:when>
                 <xsl:otherwise>
