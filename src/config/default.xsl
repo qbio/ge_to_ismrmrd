@@ -106,7 +106,7 @@
             <x><xsl:value-of select="Header/AcquiredXRes"/></x>
             <y><xsl:value-of select="Header/AcquiredYRes"/></y>
             <xsl:choose>
-                <xsl:when test="Header/is3DAcquisition='true'">
+                <xsl:when test="(Header/is3DAcquisition)='true'">
                    <z><xsl:value-of select="Header/AcquiredZRes"/></z>
                 </xsl:when>
                 <xsl:otherwise>
@@ -118,7 +118,14 @@
             <x><xsl:value-of select="Header/TransformXRes * Header/Image/PixelSizeX"/></x>
             <y><xsl:value-of select="Header/TransformYRes * Header/Image/PixelSizeY"/></y>
             <!-- <z><xsl:value-of select="Header/Image/SliceThickness + Header/Image/SliceSpacing"/></z> -->
-            <z><xsl:value-of select="Header/Image/SliceThickness"/></z>
+            <xsl:choose>
+                <xsl:when test="(Header/is3DAcquisition)='true'">
+                  <z><xsl:value-of select="Header/Image/SliceThickness * Header/TransformZRes"/></z>
+                </xsl:when>
+                <xsl:otherwise>
+                  <z><xsl:value-of select="Header/Image/SliceThickness"/></z>
+                </xsl:otherwise>
+            </xsl:choose>
           </fieldOfView_mm>
         </encodedSpace>
         <reconSpace>
@@ -126,7 +133,7 @@
             <x><xsl:value-of select="Header/TransformXRes"/></x>
             <y><xsl:value-of select="Header/TransformYRes"/></y>
             <xsl:choose>
-                <xsl:when test="(Header/Is3DAcquisition)='true'">
+                <xsl:when test="(Header/is3DAcquisition)='true'">
                    <z><xsl:value-of select="Header/TransformZRes"/></z>
                 </xsl:when>
                 <xsl:otherwise>
@@ -138,7 +145,14 @@
             <x><xsl:value-of select="Header/TransformXRes * Header/Image/PixelSizeX"/></x>
             <y><xsl:value-of select="Header/TransformYRes * Header/Image/PixelSizeY"/></y>
             <!-- <z><xsl:value-of select="Header/Image/SliceThickness + Header/Image/SliceSpacing"/></z> -->
-            <z><xsl:value-of select="Header/Image/SliceSpacing"/></z>
+            <xsl:choose>
+                <xsl:when test="(Header/is3DAcquisition)='true'">
+                  <z><xsl:value-of select="Header/Image/SliceSpacing * Header/TransformZRes"/></z>
+                </xsl:when>
+                <xsl:otherwise>
+                  <z><xsl:value-of select="Header/Image/SliceSpacing"/></z>
+                </xsl:otherwise>
+            </xsl:choose>
           </fieldOfView_mm>
         </reconSpace>
         <encodingLimits>
@@ -148,14 +162,23 @@
             <center><xsl:value-of select="floor(Header/AcquiredYRes div 2)"/> </center>
           </kspace_encoding_step_1>
           <kspace_encoding_step_2>
-            <minimum>0</minimum>
-            <maximum>0</maximum>
-            <center>0</center>
+            <xsl:choose>
+              <xsl:when test="(Header/is3DAcquisition)='true'">
+                <minimum>0</minimum>
+                <maximum><xsl:value-of select="Header/AcquiredZRes - 1"/></maximum>
+                <center><xsl:value-of select="floor(Header/AcquiredZRes div 2)"/></center>
+              </xsl:when>
+              <xsl:otherwise>
+                <minimum>0</minimum>
+                <maximum>0</maximum>
+                <center>0</center>
+              </xsl:otherwise>
+            </xsl:choose>
           </kspace_encoding_step_2>
           <slice>
             <minimum>0</minimum>
             <maximum><xsl:value-of select="Header/SliceCount - 1"/></maximum>
-            <center><xsl:value-of select="floor(Header/SliceCount div 2)"/></center>
+            <center><xsl:value-of select="floor(Header/SliceCount div 2)"/></center>  
           </slice>
           <set>
             <minimum>0</minimum>
@@ -175,7 +198,7 @@
                 <center><xsl:value-of select="floor(Header/RepetitionCount div 2)"/></center>
               </xsl:when>
               <xsl:otherwise>
-                <maximum><xsl:value-of select="1"/></maximum>
+                <maximum><xsl:value-of select="0"/></maximum>
                 <center><xsl:value-of select="0"/></center>
               </xsl:otherwise>
             </xsl:choose>
@@ -193,7 +216,7 @@
                 <center><xsl:value-of select="floor(Header/EchoCount div 2)"/></center>
               </xsl:when>
               <xsl:otherwise>
-                <maximum><xsl:value-of select="1"/></maximum>
+                <maximum><xsl:value-of select="0"/></maximum>
                 <center><xsl:value-of select="0"/></center>
               </xsl:otherwise>
             </xsl:choose>
