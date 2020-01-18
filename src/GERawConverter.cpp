@@ -333,7 +333,7 @@ std::string GERawConverter::getIsmrmrdXMLHeader()
 
     std::string ge_raw_file_header(ge_header_to_xml(lxData_, processingControl_));
 
-    // DEBUG: std::cout << "Converted header as XML string is: " << ge_raw_file_header << std::endl;
+    std::cout << "Converted header as XML string is: " << ge_raw_file_header << std::endl;
 
     xmlSubstituteEntitiesDefault(1);
     xmlLoadExtDtdDefaultValue = 1;
@@ -373,6 +373,9 @@ std::string GERawConverter::getIsmrmrdXMLHeader()
 
     std::string ismrmrd_header((char*)output, len);
     xmlFree(output);
+
+    std::cout << std::endl << "AFTER stylesheet application: " << std::endl;
+    std::cout << ismrmrd_header << std::endl;
     return ismrmrd_header;
 }
 
@@ -440,7 +443,13 @@ static std::string ge_header_to_xml(GERecon::Legacy::LxDownloadDataPointer lxDat
     writer.addBooleanElement("isGrassData",        processingControl->Value<bool>("GrassData"));
     // writer.addBooleanElement("is3DASL",            processingControl->Value<bool>("Is3DASL"));
 
-    writer.formatElement("SliceCount", "%d",       processingControl->Value<int>("NumSlices"));
+    if (processingControl->Value<bool>("Is3DAcquisition")) {
+        // this should be the number of slabs if this were a multi-slab 3D
+        writer.formatElement("SliceCount", "%d",       1);
+    } else {
+        writer.formatElement("SliceCount", "%d",       processingControl->Value<int>("NumSlices"));
+    }
+    
     writer.formatElement("ChannelCount", "%d",     processingControl->Value<int>("NumChannels"));
     // writer.formatElement("RepetitionCount", "%d",  1 /* pfile->RepetitionCount() */); // identify variable for this
     writer.formatElement("OtherUID", "%s",         GEDicom::UID::Create(GEDicom::UID::OtherUID).c_str());
@@ -511,7 +520,7 @@ static std::string ge_header_to_xml(GERecon::Legacy::LxDownloadDataPointer lxDat
     writer.formatElement("AcquiredXRes", "%d",     processingControl->Value<int>("AcquiredXRes"));
     writer.formatElement("AcquiredYRes", "%d",     processingControl->Value<int>("AcquiredYRes"));
     writer.formatElement("AcquiredZRes", "%d",     processingControl->Value<int>("AcquiredZRes"));
-
+     
     writer.addBooleanElement("EvenEchoFrequencyFlip", processingControl->Value<bool>("EvenEchoFrequencyFlip"));
     writer.addBooleanElement("OddEchoFrequencyFlip",  processingControl->Value<bool>("OddEchoFrequencyFlip"));
     writer.addBooleanElement("EvenEchoPhaseFlip",  processingControl->Value<bool>("EvenEchoPhaseFlip"));
