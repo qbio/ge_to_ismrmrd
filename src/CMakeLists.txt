@@ -10,6 +10,7 @@ include_directories(
 # build P-File to ISMRMRD converter library and tool
 set(P2I_LIB "p2i")
 add_library(${P2I_LIB} SHARED
+    GEScanArchive.cpp
     GERawConverter.cpp
     Plugin.cpp)
 target_link_libraries(${P2I_LIB}
